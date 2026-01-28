@@ -836,19 +836,21 @@ function showSection(sectionId) {
             const streamData = await getDirectStream(id, isMovie, season, episode);
             if (!streamData || !streamData.m3u8Url) throw new Error("Stream non trovato");
 
-            player = videojs("player-video", {
-                controls: true,
-                fluid: true,
-                aspectRatio: "16:9",
-                html5: {
-                    vhs: { 
-                        overrideNative: true, // Su PC forziamo sempre VHS
-                        bandwidth: 5000000 
-                    }
-                }
-            });
-            
-            const controlBar = player.getChild('controlBar');
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+player = videojs("player-video", {
+    controls: true,
+    fluid: true,
+    aspectRatio: "16:9",
+    html5: {
+        vhs: {
+            overrideNative: !isIOS, // usa player nativo su iPhone
+            bandwidth: 5000000
+        }
+    }
+});
+
+const controlBar = player.getChild('controlBar');
 
 // Trova il componente esistente che mostra il tempo corrente
 const currentTimeDisplay = controlBar.getChild('CurrentTimeDisplay');
@@ -877,16 +879,17 @@ if (currentTimeDisplay) {
             player.src({ src: applyCorsProxy(streamData.m3u8Url), type: "application/x-mpegURL" });
 
             player.ready(() => {
-                showLoading(false);
-                const savedVol = localStorage.getItem("vix_volume");
-                if (savedVol) player.volume(parseFloat(savedVol));
-                trackAndResume(player, id, isMovie ? 'movie' : 'tv', season, episode);
-                player.play().catch(() => {});
-            });
+    showLoading(false);
+    const savedVol = localStorage.getItem("vix_volume");
+    if (savedVol) player.volume(parseFloat(savedVol));
+    trackAndResume(player, id, isMovie ? 'movie' : 'tv', season, episode);
+    player.play().catch(() => {});
 
-            player.on('volumechange', () => {
-                localStorage.setItem("vix_volume", player.volume());
-            });
+    player.on('loadedmetadata', () => player.controlBar.getChild('CurrentTimeDisplay')?.update());
+            
+        });
+    }
+});
 
         } catch (error) {
             console.error("❌ Errore player:", error);
