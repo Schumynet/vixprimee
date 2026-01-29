@@ -3,14 +3,14 @@
 
 const API_KEY = "8265bd1679663a7ea12ac168da84d2e8";
 const VIXSRC_URL = "vixsrc.to";
+// PROXY LIST presa dall'index-wzrcuT8C.js
 const CORS_PROXIES_REQUIRING_ENCODING = [""];
 const CORS_LIST = [
-    "cors-anywhere.com/",
-    "corsproxy.io/",
-    "api.allorigins.win/raw?url=",
-    ...CORS_PROXIES_REQUIRING_ENCODING,
+    "api.codetabs.com/v1/proxy?quest=", // query-style proxy (needs encoding)
+    "cors.bridged.cc/",                 // prefix-style
+    "thingproxy.freeboard.io/",         // prefix-style
 ];
-let CORS = "corsproxy.io/";
+let CORS = "cors.bridged.cc/";
 
 const shownContinuaIds = new Set();
 const endpoints = {
@@ -69,7 +69,7 @@ const STORAGE = {
 
 const StreamConfig = {
     PROXIES: CORS_LIST.map(entry => {
-        if (entry.includes("?") && entry.includes("url=")) return { url: entry, mode: "query" };
+        if (entry.includes("?") && entry.includes("url=") || entry.toLowerCase().includes("?quest=")) return { url: entry, mode: "query" };
         return { url: entry, mode: "prefix" };
     }),
     PROXY_TEST_TIMEOUT_MS: 4000,
@@ -80,12 +80,34 @@ const StreamConfig = {
     DEBUG: true
 };
 
+/**
+ * Compose proxied URL ensuring scheme is present.
+ * - For query proxies: returns <scheme>://<proxy.url><encoded target>
+ * - For prefix proxies: returns <scheme>://<proxy.url-without-trailing-slash>/<target-without-protocol>
+ */
 function composeProxiedUrl(proxy, targetUrl) {
     if (!proxy || !proxy.url) return targetUrl;
-    if (proxy.mode === "query") return proxy.url + encodeURIComponent(targetUrl);
-    const p = proxy.url.replace(/\/$/, "");
-    const t = targetUrl.replace(/^https?:\/\//, "");
-    return `${p}/${t}`;
+
+    // ensure target exists
+    const target = String(targetUrl || "");
+
+    // ensure proxy base has scheme
+    let proxyBase = String(proxy.url || "");
+    if (!/^https?:\/\//i.test(proxyBase)) {
+        proxyBase = "https://" + proxyBase;
+    }
+
+    if (proxy.mode === "query") {
+        // proxyBase already contains the ?... part for query-style proxies (e.g. api.codetabs.com/v1/proxy?quest=)
+        // ensure it ends with = or & so encoding appends cleanly
+        return proxyBase + encodeURIComponent(target);
+    } else {
+        // prefix
+        // remove trailing slash from proxyBase and leading protocol from target
+        const p = proxyBase.replace(/\/$/, "");
+        const t = target.replace(/^https?:\/\//i, "");
+        return p + "/" + t;
+    }
 }
 
 async function testOneProxy(proxy, testUrl) {
@@ -107,7 +129,7 @@ async function findBestProxy(testTarget = `https://${VIXSRC_URL}/`) {
         const val = corsSelect.value;
         log("User selected CORS proxy:", val);
         CORS = val;
-        return { url: val, mode: val.includes("?url=") ? "query" : "prefix" };
+        return { url: val, mode: val.includes("?") && val.includes("url=") ? "query" : "prefix" };
     }
 
     const cached = loadJSON(STORAGE.WORKING_PROXY);
@@ -301,13 +323,11 @@ function scheduleStreamRefresh(tmdbId, isMovie, season, episode, tokenInfo, prox
 async function attemptRefreshInPlace(tmdbId, isMovie, season, episode, proxy) {
     try {
         log("Attempting in-place refresh for", tmdbId);
-        // Simply re-run getDirectStream to obtain fresh m3u8 and token info
         const newStream = await getDirectStream(tmdbId, isMovie, season, episode, proxy);
         if (!newStream || !newStream.m3u8Url) throw new Error("No new m3u8 obtained");
-        const proxied = applyCorsProxy(newStream.m3u8Url);
+        const proxied = proxy ? composeProxiedUrl(proxy, newStream.m3u8Url) : applyCorsProxy(newStream.m3u8Url);
         if (player) {
             try {
-                // Replace source for Video.js
                 player.src({ src: proxied, type: "application/x-mpegURL" });
                 player.play().catch(() => {});
                 log("Player reloaded with refreshed m3u8");
@@ -559,7 +579,6 @@ async function loadVideo(isMovie, id, season = null, episode = null) {
 /* ============== resto del file originale (UI, TMDB, cards, backup, etc.) ============== */
 
 // ===== FUNZIONI HELPER (già presenti sopra: showSection, showNotification, setupMobileEnhancements) =====
-// (sono già definite in questo file - reusable)
 
 // ===== GESTIONE UI =====
 function setupEventListeners() {
@@ -706,7 +725,7 @@ function createCard(item, cookieNames = [], isRemovable = false) {
             const confirmDelete = confirm(`Vuoi rimuovere "${rawTitle}" dalla visione?`);
             if (confirmDelete) {
                 cookieNames.forEach((name) => {
-                    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`;
+                    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/`;
                 });
                 card.remove();
                 shownContinuaIds.delete(item.id);
@@ -916,7 +935,6 @@ async function loadContinuaDaCookie() {
                 item.name = `${item.name} (S${season}x${episode})`;
             }
             const card = createCard(item, [name], true);
-
             if (type === 'tv' && season !== null && episode !== null) {
                 card.addEventListener("click", async (e) => {
                     if (e.target.closest('.remove-btn')) return;
@@ -969,7 +987,6 @@ function esportaBackup() {
             .then(data => { const shortUrl = data.contents.trim(); navigator.clipboard.writeText(shortUrl); outputElem.innerHTML = `<div style="margin-bottom: 5px;">✅ <strong>Backup Pronto!</strong></div><div style="font-size: 0.8rem; opacity: 0.8; margin-bottom: 8px;">Il link è stato copiato negli appunti:</div><a href="${shortUrl}" target="_blank">${shortUrl}</a>`; showNotification("✅ Backup generato e copiato!"); })
             .catch(() => { if (outputElem) { outputElem.style.background = "rgba(229, 9, 20, 0.1)"; outputElem.style.borderColor = "var(--primary)"; outputElem.innerHTML = `❌ Errore generazione. Copia manualmente:<br><small>${fullUrl}</small>`; prompt("Copia il link di backup manualmente:", fullUrl); } });
     } else {
-        // fallback: copy fullUrl
         prompt("Backup URL (copia):", fullUrl);
     }
 }
@@ -1023,7 +1040,7 @@ function handleKeyboardShortcuts(event) {
         case "arrowup":
             event.preventDefault(); player.volume(Math.min(player.volume() + 0.1, 1)); showVolumeFeedback(Math.round(player.volume()*100)); break;
         case "arrowdown":
-            event.preventDefault(); player.volume(Math.max(player.volume() - 0.1, 0)); showVolumeFeedback(Math.round(player.volume()*100)); break;
+            event.preventDefault(); player.volume(Math.max(player.volume() - 1, 0)); showVolumeFeedback(Math.round(player.volume()*100)); break;
         case "f":
             event.preventDefault(); if (player.isFullscreen()) player.exitFullscreen(); else player.requestFullscreen(); break;
         case "m":
@@ -1080,7 +1097,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             corsSelect.addEventListener("change", (e) => {
                 CORS = e.target.value;
                 showNotification(`CORS proxy cambiato: ${CORS.replace(/\/|\?|=/g, "")}`);
-                saveJSON(STORAGE.WORKING_PROXY, { proxy: { url: CORS, mode: CORS.includes("?url=") ? "query" : "prefix" }, checkedAt: Date.now() });
+                saveJSON(STORAGE.WORKING_PROXY, { proxy: { url: CORS, mode: CORS.includes("?") && CORS.includes("url=") ? "query" : "prefix" }, checkedAt: Date.now() });
             });
         } else {
             const best = await findBestProxy(`https://${VIXSRC_URL}/`);
