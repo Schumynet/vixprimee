@@ -2,12 +2,12 @@ const API_KEY = "8265bd1679663a7ea12ac168da84d2e8";
     const VIXSRC_URL = "vixsrc.to";
     const CORS_PROXIES_REQUIRING_ENCODING = [""];
     const CORS_LIST = [
-        "cors-anywhere.com/",
-        "corsproxy.io/",
-        "api.allorigins.win/raw?url=",
+        ""api.codetabs.com/v1/proxy?quest=", // query-style (fornito)
+    "cors.bridged.cc/",                 // prefix-style
+    "thingproxy.freeboard.io/",         // prefix-style
         ...CORS_PROXIES_REQUIRING_ENCODING,
     ];
-    let CORS = "corsproxy.io/";
+    let CORS = "cors.bridged.cc/";
 
     const shownContinuaIds = new Set();
     const endpoints = {
