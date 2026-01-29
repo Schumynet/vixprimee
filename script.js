@@ -1,13 +1,13 @@
 const API_KEY = "8265bd1679663a7ea12ac168da84d2e8";
     const VIXSRC_URL = "vixsrc.to";
     const CORS_PROXIES_REQUIRING_ENCODING = [""];
-      const CORS_LIST = [
-    "api.codetabs.com/v1/proxy?quest=", // query-style (fornito)
-    "cors.bridged.cc/",                 // prefix-style
-    "thingproxy.freeboard.io/",         // prefix-style
-     ...CORS_PROXIES_REQUIRING_ENCODING,
+    const CORS_LIST = [
+        "cors-anywhere.com/",
+        "corsproxy.io/",
+        "api.allorigins.win/raw?url=",
+        ...CORS_PROXIES_REQUIRING_ENCODING,
     ];
-      let CORS = "cors.bridged.cc/";
+    let CORS = "corsproxy.io/";
 
     const shownContinuaIds = new Set();
     const endpoints = {
@@ -125,289 +125,192 @@ function showSection(sectionId) {
         setViewportHeight();
     }
 
-    // ===== VARIABILI GLOBALI DI SUPPORTO =====
-let requestHookInstalled = false;
-const DEFAULT_BASE = "https://vixsrc.to";
-const CORS_LIST = window.CORS_LIST || ["cors.example.com/"];
-const CORS_PROXIES_REQUIRING_ENCODING = window.CORS_PROXIES_REQUIRING_ENCODING || [];
-let CORS = window.CORS || CORS_LIST[0] || "";
-
-// ===== INIZIALIZZAZIONE =====
-document.addEventListener("DOMContentLoaded", async () => {
-  try {
-    // 1. GESTIONE AUTO-IMPORT BACKUP
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.has("backup")) {
-      const backupCode = urlParams.get("backup");
-      console.log("🚀 Rilevato backup nell'URL, avvio importazione automatica...");
-      if (typeof importaBackup === "function") {
-        await importaBackup(backupCode);
-      } else {
-        console.warn("importaBackup non definita");
-      }
-      return;
-    }
-
-    // 2. CONFIGURAZIONE CORS PROXY
-    const corsSelect = document.getElementById("cors-select");
-    if (corsSelect) {
-      // pulizia lista e popolamento
-      corsSelect.innerHTML = "";
-      CORS_LIST.forEach((proxy) => {
-        const option = document.createElement("option");
-        option.value = proxy;
-        option.textContent = proxy.replace(/\/|\?|=/g, "");
-        corsSelect.appendChild(option);
-      });
-      // imposta valore corrente (fallback a prima voce)
-      corsSelect.value = CORS || CORS_LIST[0] || "";
-      CORS = corsSelect.value;
-
-      corsSelect.addEventListener("change", (e) => {
-        CORS = e.target.value;
-        console.log("🌐 CORS proxy cambiato:", CORS);
-        if (typeof showNotification === "function") {
-          showNotification(`CORS proxy cambiato: ${CORS.replace(/\/|\?|=/g, "")}`);
+    // ===== INIZIALIZZAZIONE =====
+    document.addEventListener("DOMContentLoaded", async () => {
+        // 1. GESTIONE AUTO-IMPORT BACKUP
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('backup')) {
+            const backupCode = urlParams.get('backup');
+            console.log("🚀 Rilevato backup nell'URL, avvio importazione automatica...");
+            await importaBackup(backupCode);
+            return;
         }
-      });
-    } else {
-      console.warn("Elemento #cors-select non trovato, uso CORS di default:", CORS);
-    }
 
-    // 3. SETUP VIDEO.JS
-    if (typeof videojs !== "undefined") {
-      setupVideoJsXhrHook();
-    } else {
-      window.addEventListener("load", setupVideoJsXhrHook, { once: true });
-    }
+        // 2. CONFIGURAZIONE CORS PROXY
+        const corsSelect = document.getElementById("cors-select");
+        if (corsSelect) {
+            CORS_LIST.forEach((proxy) => {
+                const option = document.createElement("option");
+                option.value = proxy;
+                option.textContent = proxy.replace(/\/|\?|=/g, "");
+                corsSelect.appendChild(option);
+            });
+            corsSelect.value = CORS;
 
-    // 4. SETUP MOBILE ENHANCEMENTS
-    if (typeof setupMobileEnhancements === "function") {
-      setupMobileEnhancements();
-    }
+            corsSelect.addEventListener("change", (e) => {
+                CORS = e.target.value;
+                console.log("🌐 CORS proxy cambiato:", CORS);
+                showNotification(`CORS proxy cambiato: ${CORS.replace(/\/|\?|=/g, "")}`);
+            });
+        }
 
-    // 5. CARICAMENTO SEZIONI HOME DA TMDB
-    console.log("📡 Caricamento contenuti da TMDB...");
-    if (typeof endpoints === "object" && endpoints !== null) {
-      for (const [key] of Object.entries(endpoints)) {
-        try {
-          if (typeof fetchList !== "function") {
-            console.warn("fetchList non definita, salto caricamento sezioni");
-            break;
-          }
-          const items = await fetchList(key);
-          const section = document.getElementById(key);
-          if (section) {
-            const carouselTrack = section.querySelector(".carousel-track");
-            if (carouselTrack && Array.isArray(items)) {
-              items.forEach((item) => {
-                if (typeof createCard === "function") {
-                  carouselTrack.appendChild(createCard(item));
+        // 3. SETUP VIDEO.JS
+        if (typeof videojs !== "undefined") {
+            setupVideoJsXhrHook();
+        } else {
+            window.addEventListener("load", setupVideoJsXhrHook);
+        }
+
+        // 4. SETUP MOBILE ENHANCEMENTS
+        setupMobileEnhancements();
+
+        // 5. CARICAMENTO SEZIONI HOME DA TMDB
+        console.log("📡 Caricamento contenuti da TMDB...");
+        for (const [key, endpoint] of Object.entries(endpoints)) {
+            try {
+                const items = await fetchList(key);
+                const section = document.getElementById(key);
+                if (section) {
+                    const carouselTrack = section.querySelector(".carousel-track");
+                    if (carouselTrack) {
+                        items.forEach((item) => {
+                            carouselTrack.appendChild(createCard(item));
+                        });
+                    } else {
+                        console.error(`Carousel track non trovato per ${key}`);
+                    }
                 }
-              });
-            } else {
-              console.error(`Carousel track non trovato o items non valido per ${key}`);
+            } catch (err) {
+                console.error(`Errore nel caricamento della sezione ${key}:`, err);
             }
-          }
-        } catch (err) {
-          console.error(`Errore nel caricamento della sezione ${key}:`, err);
         }
-      }
-    } else {
-      console.warn("endpoints non definito o non è un oggetto");
-    }
 
-    // 6. CARICAMENTO DATI UTENTE
-    if (typeof loadContinuaDaCookie === "function") await loadContinuaDaCookie();
-    if (typeof loadPreferiti === "function") await loadPreferiti();
-    if (typeof loadGenreSections === "function") await loadGenreSections();
-
-    // 7. SETUP EVENT LISTENERS
-    if (typeof setupEventListeners === "function") setupEventListeners();
-    if (typeof setupCarouselNavigation === "function") setupCarouselNavigation();
-
-    // 8. SETUP HEADER SCROLL con debounce
-    const header = document.getElementById("header");
-    if (header) {
-      let scrollTimeout = null;
-      window.addEventListener(
-        "scroll",
-        () => {
-          if (scrollTimeout) clearTimeout(scrollTimeout);
-          scrollTimeout = setTimeout(() => {
+        // 6. CARICAMENTO DATI UTENTE
+        await loadContinuaDaCookie();
+        await loadPreferiti();
+        await loadGenreSections();
+        
+        // 7. SETUP EVENT LISTENERS
+        setupEventListeners();
+        setupCarouselNavigation();
+        
+        // 8. SETUP HEADER SCROLL
+        window.addEventListener("scroll", () => {
+            const header = document.getElementById("header");
             if (window.scrollY > 50) {
-              header.classList.add("scrolled");
+                header.classList.add("scrolled");
             } else {
-              header.classList.remove("scrolled");
+                header.classList.remove("scrolled");
             }
-          }, 50);
-        },
-        { passive: true }
-      );
+        });
+        
+        console.log("✅ Sito pronto!");
+    });
+
+    // ===== GESTIONE CORS =====
+    function extractBaseUrl(url) {
+        try {
+            const CORS = document.getElementById("cors-select").value;
+            let cleanUrl = url;
+            if (url.includes(CORS)) {
+                cleanUrl = url.split(CORS)[1];
+            }
+
+            const urlObj = new URL(cleanUrl);
+            return `${urlObj.protocol}//${urlObj.host}`;
+        } catch (e) {
+            console.error("Error extracting base URL:", e);
+            return "";
+        }
     }
 
-    // pulizia hook videojs al unload della pagina
-    window.addEventListener("beforeunload", removeVideoJsXhrHook);
+    function resolveUrl(url, baseUrl = "https://vixsrc.to") {
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
 
-    console.log("✅ Sito pronto!");
-  } catch (e) {
-    console.error("Errore durante l'inizializzazione:", e);
-  }
-});
+        if (url.startsWith("/")) {
+            return baseUrl + url;
+        }
 
-// ===== GESTIONE CORS =====
-function extractBaseUrl(url) {
-  try {
-    const corsSelect = document.getElementById("cors-select");
-    const currentCors = corsSelect ? corsSelect.value : CORS;
-    let cleanUrl = String(url || "");
-
-    // se l'URL contiene il proxy, rimuovilo
-    if (currentCors && cleanUrl.includes(currentCors)) {
-      const parts = cleanUrl.split(currentCors);
-      cleanUrl = parts.slice(1).join(currentCors) || parts[0];
-      // se era codificato, proviamo a decodificare in modo sicuro
-      try {
-        cleanUrl = decodeURIComponent(cleanUrl);
-      } catch (e) {
-        // ignore decode errors
-      }
+        return baseUrl + "/" + url;
     }
 
-    // se è relativo, non possiamo estrarre host: ritorna base di default
-    if (!/^https?:\/\//i.test(cleanUrl)) {
-      return DEFAULT_BASE;
+    function applyCorsProxy(url) {
+        const CORS = document.getElementById("cors-select").value;
+        const requiresEncoding = CORS_PROXIES_REQUIRING_ENCODING.some(
+            (proxy) => CORS === proxy
+        );
+        let cleanUrl = url;
+        if (url.includes(CORS)) {
+            if (requiresEncoding) {
+                cleanUrl = decodeURIComponent(url.split(CORS)[1]);
+            } else {
+                cleanUrl = url.split(CORS)[1];
+            }
+        }
+        if (
+            !cleanUrl.startsWith("http://") &&
+            !cleanUrl.startsWith("https://")
+        ) {
+            cleanUrl = resolveUrl(cleanUrl);
+            console.log("🔗 Resolved relative URL:", url, "->", cleanUrl);
+        }
+        if (
+            cleanUrl.startsWith("data:") ||
+            cleanUrl.startsWith("blob:") ||
+            !cleanUrl.startsWith("https://vixsrc.to")
+        ) {
+            return url;
+        }
+
+        console.log("🔒 Applying CORS proxy to:", cleanUrl);
+        if (requiresEncoding) {
+            return `https://${CORS}${encodeURIComponent(cleanUrl)}`;
+        } else {
+            return `https://${CORS}${cleanUrl}`;
+        }
     }
 
-    const urlObj = new URL(cleanUrl);
-    return `${urlObj.protocol}//${urlObj.host}`;
-  } catch (e) {
-    console.error("Error extracting base URL:", e);
-    return DEFAULT_BASE;
-  }
-}
+    const xhrRequestHook = (options) => {
+        const originalUri = options.uri;
+        options.uri = applyCorsProxy(originalUri);
 
-function resolveUrl(url, baseUrl = DEFAULT_BASE) {
-  try {
-    if (!url) return baseUrl;
-    const trimmed = String(url).trim();
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    if (trimmed.startsWith("//")) {
-      // protocol-relative
-      return window.location.protocol + trimmed;
-    }
-    if (trimmed.startsWith("/")) return baseUrl.replace(/\/$/, "") + trimmed;
-    return baseUrl.replace(/\/$/, "") + "/" + trimmed;
-  } catch (e) {
-    console.error("Error resolving URL:", e);
-    return url;
-  }
-}
+        console.log("📡 XHR Request intercepted:");
+        console.log("   Original:", originalUri);
+        console.log("   Proxied:", options.uri);
 
-function applyCorsProxy(url) {
-  try {
-    if (!url) return url;
-    const corsSelect = document.getElementById("cors-select");
-    const currentCors = corsSelect ? corsSelect.value : CORS;
-    const requiresEncoding = CORS_PROXIES_REQUIRING_ENCODING.includes(currentCors);
-    let original = String(url);
+        return options;
+    };
 
-    // se è già un data/blob o non è una stringa utile, ritorna così com'è
-    if (/^(data:|blob:)/i.test(original)) return original;
+    function setupVideoJsXhrHook() {
+        if (typeof videojs === "undefined" || !videojs.Vhs) {
+            console.warn("⚠️ Video.js or Vhs not loaded yet");
+            return;
+        }
 
-    // se l'URL è già proxied con lo stesso CORS, non lo modifichiamo
-    if (currentCors && original.startsWith(`https://${currentCors}`)) {
-      return original;
+        if (requestHookInstalled) {
+            console.log("✅ XHR hook already installed");
+            return;
+        }
+
+        console.log("🔧 Setting up Video.js XHR hook");
+        videojs.Vhs.xhr.onRequest(xhrRequestHook);
+        requestHookInstalled = true;
+        console.log("✅ Video.js XHR hook installed");
     }
 
-    // se l'URL contiene il proxy in forma non prefissata (es. .../https://...), rimuoviamo la parte proxy
-    if (currentCors && original.includes(currentCors)) {
-      const parts = original.split(currentCors);
-      original = parts.slice(1).join(currentCors) || parts[0];
-      try {
-        original = decodeURIComponent(original);
-      } catch (e) {
-        // ignore
-      }
+    function removeVideoJsXhrHook() {
+        if (
+            typeof videojs !== "undefined" &&
+            videojs.Vhs &&
+            requestHookInstalled
+        ) {
+            console.log("🧹 Removing XHR hook");
+            videojs.Vhs.xhr.offRequest(xhrRequestHook);
+            requestHookInstalled = false;
+        }
     }
-
-    // risolvi relativi
-    if (!/^https?:\/\//i.test(original)) {
-      original = resolveUrl(original);
-      console.log("🔗 Resolved relative URL:", url, "->", original);
-    }
-
-    // se non è sotto il dominio sorgente atteso, evita di proxyare (configurabile)
-    // qui consideriamo proxy solo per risorse sotto DEFAULT_BASE per evitare proxying di risorse esterne
-    if (!original.startsWith(DEFAULT_BASE) && !original.startsWith(window.location.origin)) {
-      // lasciare la possibilità di proxyare comunque: commenta la riga sotto se vuoi proxyare tutto
-      return original;
-    }
-
-    console.log("🔒 Applying CORS proxy to:", original);
-    // costruzione URL proxy senza doppia slash errata
-    const prefix = `https://${currentCors.replace(/\/$/, "")}`;
-    if (requiresEncoding) {
-      return `${prefix}/${encodeURIComponent(original)}`;
-    } else {
-      // se il proxy si aspetta il path diretto, rimuoviamo il protocollo per evitare // in mezzo
-      const withoutProto = original.replace(/^https?:\/\//i, "");
-      return `${prefix}/${withoutProto}`;
-    }
-  } catch (e) {
-    console.error("applyCorsProxy error:", e);
-    return url;
-  }
-}
-
-// Hook per Video.js Vhs XHR
-const xhrRequestHook = (options) => {
-  try {
-    const originalUri = options && (options.uri || options.url || "");
-    const proxied = applyCorsProxy(originalUri);
-    // manteniamo la proprietà originale se presente
-    if (options.uri !== undefined) options.uri = proxied;
-    if (options.url !== undefined) options.url = proxied;
-
-    console.log("📡 XHR Request intercepted:");
-    console.log("   Original:", originalUri);
-    console.log("   Proxied:", proxied);
-  } catch (e) {
-    console.error("xhrRequestHook error:", e);
-  }
-  return options;
-};
-
-function setupVideoJsXhrHook() {
-  try {
-    if (typeof videojs === "undefined" || !videojs.Vhs || !videojs.Vhs.xhr) {
-      console.warn("⚠️ Video.js Vhs xhr non disponibile");
-      return;
-    }
-    if (requestHookInstalled) {
-      console.log("✅ XHR hook already installed");
-      return;
-    }
-    console.log("🔧 Setting up Video.js XHR hook");
-    videojs.Vhs.xhr.onRequest(xhrRequestHook);
-    requestHookInstalled = true;
-    console.log("✅ Video.js XHR hook installed");
-  } catch (e) {
-    console.error("setupVideoJsXhrHook error:", e);
-  }
-}
-
-function removeVideoJsXhrHook() {
-  try {
-    if (typeof videojs !== "undefined" && videojs.Vhs && videojs.Vhs.xhr && requestHookInstalled) {
-      console.log("🧹 Removing XHR hook");
-      videojs.Vhs.xhr.offRequest(xhrRequestHook);
-      requestHookInstalled = false;
-    }
-  } catch (e) {
-    console.error("removeVideoJsXhrHook error:", e);
-  }
-}
 
     // ===== GESTIONE UI =====
     function setupEventListeners() {
@@ -933,21 +836,19 @@ function removeVideoJsXhrHook() {
             const streamData = await getDirectStream(id, isMovie, season, episode);
             if (!streamData || !streamData.m3u8Url) throw new Error("Stream non trovato");
 
-            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-
-player = videojs("player-video", {
-    controls: true,
-    fluid: true,
-    aspectRatio: "16:9",
-    html5: {
-        vhs: {
-            overrideNative: !isIOS, // usa player nativo su iPhone
-            bandwidth: 5000000
-        }
-    }
-});
-
-const controlBar = player.getChild('controlBar');
+            player = videojs("player-video", {
+                controls: true,
+                fluid: true,
+                aspectRatio: "16:9",
+                html5: {
+                    vhs: { 
+                        overrideNative: true, // Su PC forziamo sempre VHS
+                        bandwidth: 5000000 
+                    }
+                }
+            });
+            
+            const controlBar = player.getChild('controlBar');
 
 // Trova il componente esistente che mostra il tempo corrente
 const currentTimeDisplay = controlBar.getChild('CurrentTimeDisplay');
@@ -976,17 +877,16 @@ if (currentTimeDisplay) {
             player.src({ src: applyCorsProxy(streamData.m3u8Url), type: "application/x-mpegURL" });
 
             player.ready(() => {
-    showLoading(false);
-    const savedVol = localStorage.getItem("vix_volume");
-    if (savedVol) player.volume(parseFloat(savedVol));
-    trackAndResume(player, id, isMovie ? 'movie' : 'tv', season, episode);
-    player.play().catch(() => {});
+                showLoading(false);
+                const savedVol = localStorage.getItem("vix_volume");
+                if (savedVol) player.volume(parseFloat(savedVol));
+                trackAndResume(player, id, isMovie ? 'movie' : 'tv', season, episode);
+                player.play().catch(() => {});
+            });
 
-    player.on('loadedmetadata', () => player.controlBar.getChild('CurrentTimeDisplay')?.update());
-            
-        });
-    }
-});
+            player.on('volumechange', () => {
+                localStorage.setItem("vix_volume", player.volume());
+            });
 
         } catch (error) {
             console.error("❌ Errore player:", error);
