@@ -1,38 +1,39 @@
-// CONFIG PRINCIPALE
+// CONFIG PROXY NORMALIZZATA
 const API_KEY = "8265bd1679663a7ea12ac168da84d2e8";
 const VIXSRC_URL = "vixsrc.to";
 
-// Alcuni proxy (da index-wzrcuT8C.js)
+// Proxy che richiedono encoding del target (query-style)
 const CORS_PROXIES_REQUIRING_ENCODING = [
-  "api.codetabs.com/v1/proxy?quest=",    // query-style (codetabs)
-  "api.allorigins.win/raw?url="          // esempio: richiede encoding completo
+  "https://api.allorigins.win/raw?url=",
+  "https://api.codetabs.com/v1/proxy?quest="
 ];
 
+// Lista proxy (tutti con scheme https)
 const CORS_LIST = [
-  "api.codetabs.com/v1/proxy?quest=", // query-style (needs encoding)
-  "cors.bridged.cc/",                 // prefix-style
-  "thingproxy.freeboard.io/"          // prefix-style
+  "https://corsproxy.io/?",
+  "https://api.allorigins.win/raw?url=",
+  "https://thingproxy.freeboard.io/fetch/",
+  "https://yacdn.org/proxy/",
+  "https://api.codetabs.com/v1/proxy?quest=",
+  "https://cors.eu.org/",
+  "https://proxy.cors.sh/",
+  "https://cors.bridged.cc/"
 ];
 
-let CORS = "cors.bridged.cc/";
+// Valore di default usato nei fallback (puoi cambiare se preferisci un altro proxy)
+let CORS = "https://cors.bridged.cc/";
 
-// Storage keys
-const STORAGE = {
-  WORKING_PROXY: "sw_working_proxy_v1",
-  PROXY_METRICS: "sw_proxy_metrics_v1",
-  PROXY_CACHE_TTL_MS: 1000 * 60 * 10 // 10 minuti
-};
-
-// Stream/test config
+// Stream/proxy config derivato
 const StreamConfig = {
   PROXIES: CORS_LIST.map(entry => {
-    const isQuery = (entry.includes("?") && (entry.includes("url=") || entry.toLowerCase().includes("quest=")));
+    const isQuery = entry.includes("?") && (entry.includes("url=") || entry.toLowerCase().includes("quest="));
     return { url: entry, mode: isQuery ? "query" : "prefix" };
   }),
   PROXY_TEST_TIMEOUT_MS: 4000,
   FETCH_TIMEOUT_MS: 12000,
   MAX_FETCH_RETRIES: 2,
-  PROXY_CACHE_TTL_MS: STORAGE.PROXY_CACHE_TTL_MS,
+  PROXY_CACHE_TTL_MS: 1000 * 60 * 10,
+  TOKEN_REFRESH_AHEAD_MS: 20 * 1000,
   DEBUG: true
 };
 
