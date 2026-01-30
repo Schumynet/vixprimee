@@ -1,44 +1,130 @@
+// CONFIG PRINCIPALE
 const API_KEY = "8265bd1679663a7ea12ac168da84d2e8";
-    const VIXSRC_URL = "vixsrc.to";
-    const CORS_PROXIES_REQUIRING_ENCODING = [""];
-    const CORS_LIST = [
-        ""api.codetabs.com/v1/proxy?quest=", // query-style (fornito)
-    "cors.bridged.cc/",                 // prefix-style
-    "thingproxy.freeboard.io/",         // prefix-style
-        ...CORS_PROXIES_REQUIRING_ENCODING,
-    ];
-    let CORS = "cors.bridged.cc/";
+const VIXSRC_URL = "vixsrc.to";
 
-    const shownContinuaIds = new Set();
-    const endpoints = {
-        trending: `trending/all/week`,
-        nowPlaying: `movie/now_playing`,
-        popularMovies: `movie/popular`,
-        onTheAir: `tv/on_the_air`,
-        popularTV: `tv/popular`,
-    };
-    const GENRE_SECTIONS = [
-    { id: 28, name: "💥 Film d'Azione", type: "movie" },
-    { id: 16, name: "✨ Animazione", type: "movie" },
-    { id: 35, name: "😂 Commedia", type: "movie" },
-    { id: 27, name: "👻 Horror", type: "movie" },
-    { id: 878, name: "👽 Fantascienza", type: "movie" },
-    { id: 53, name: "🔪 Thriller", type: "movie" },
-    { id: 10749, name: "💕 Romantico", type: "movie" },
-    { id: 10765, name: "🐉 Serie Fantasy & Sci-Fi", type: "tv" },
-    { id: 80, name: "🕵️ Crime", type: "movie" }
+// Alcuni proxy (da index-wzrcuT8C.js)
+const CORS_PROXIES_REQUIRING_ENCODING = [
+  "api.codetabs.com/v1/proxy?quest=",    // query-style (codetabs)
+  "api.allorigins.win/raw?url="          // esempio: richiede encoding completo
 ];
 
-    let currentItem = null;
-    let currentSeasons = [];
-    let player = null;
-    let baseStreamUrl = "";
-    let requestHookInstalled = false;
+const CORS_LIST = [
+  "api.codetabs.com/v1/proxy?quest=", // query-style (needs encoding)
+  "cors.bridged.cc/",                 // prefix-style
+  "thingproxy.freeboard.io/"          // prefix-style
+];
 
-    let allowedMovies = [];
-    let allowedTV = [];
-    let allowedEpisodes = [];
+let CORS = "cors.bridged.cc/";
 
+// Storage keys
+const STORAGE = {
+  WORKING_PROXY: "sw_working_proxy_v1",
+  PROXY_METRICS: "sw_proxy_metrics_v1",
+  PROXY_CACHE_TTL_MS: 1000 * 60 * 10 // 10 minuti
+};
+
+// Stream/test config
+const StreamConfig = {
+  PROXIES: CORS_LIST.map(entry => {
+    const isQuery = (entry.includes("?") && (entry.includes("url=") || entry.toLowerCase().includes("quest=")));
+    return { url: entry, mode: isQuery ? "query" : "prefix" };
+  }),
+  PROXY_TEST_TIMEOUT_MS: 4000,
+  FETCH_TIMEOUT_MS: 12000,
+  MAX_FETCH_RETRIES: 2,
+  PROXY_CACHE_TTL_MS: STORAGE.PROXY_CACHE_TTL_MS,
+  DEBUG: true
+};
+
+/* ========== HELPERS MINIMALI ========== */
+function log(...args) { if (StreamConfig.DEBUG && console) console.log("[proxy]", ...args); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function withTimeout(promise, ms, msg = "timeout") {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+}
+function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } }
+function loadJSON(k) { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : null; } catch { return null; } }
+
+/* ========== URL / PROXY composition ========== */
+function ensureScheme(u) {
+  if (!u) return u;
+  return /^https?:\/\//i.test(u) ? u : "https://" + u;
+}
+
+function composeProxiedUrl(proxy, targetUrl) {
+  // proxy: { url, mode: 'query' | 'prefix' }
+  if (!proxy || !proxy.url) return targetUrl;
+  const target = String(targetUrl || "");
+  // normalize proxy base to have scheme
+  let proxyBase = String(proxy.url || "");
+  proxyBase = ensureScheme(proxyBase);
+  if (proxy.mode === "query") {
+    // query-style: append encoded full URL
+    return proxyBase + encodeURIComponent(target);
+  } else {
+    // prefix-style: combine without duplicating protocol
+    const p = proxyBase.replace(/\/$/, "");
+    const t = target.replace(/^https?:\/\//i, "");
+    return p + "/" + t;
+  }
+}
+
+/* ========== TEST singolo proxy ========== */
+async function testOneProxy(proxy, testUrl) {
+  const url = composeProxiedUrl(proxy, testUrl);
+  const t0 = performance.now();
+  try {
+    const resp = await withTimeout(fetch(url, { method: "GET", mode: "cors" }), StreamConfig.PROXY_TEST_TIMEOUT_MS, "proxy test timeout");
+    const t1 = performance.now();
+    return { ok: resp.ok, latency: t1 - t0, status: resp.status };
+  } catch (e) {
+    return { ok: false, latency: Infinity, error: e.message || String(e) };
+  }
+}
+
+/* ========== FIND BEST PROXY (caching + test parallelo) ========== */
+async function findBestProxy(testTarget = `https://${VIXSRC_URL}/`) {
+  // 1) If user selected proxy in UI (proxySelector or cors-select), honor it
+  const sel = document.getElementById("proxySelector") || document.getElementById("cors-select");
+  if (sel && sel.value) {
+    const url = sel.value;
+    const mode = (url.includes("?") && (url.includes("url=") || url.toLowerCase().includes("quest="))) ? "query" : "prefix";
+    log("Using user-selected proxy:", url);
+    const userProxy = { url, mode };
+    saveJSON(STORAGE.WORKING_PROXY, { proxy: userProxy, checkedAt: Date.now() });
+    return userProxy;
+  }
+
+  // 2) Check cached working proxy
+  const cached = loadJSON(STORAGE.WORKING_PROXY);
+  if (cached && (Date.now() - (cached.checkedAt || 0)) < StreamConfig.PROXY_CACHE_TTL_MS) {
+    log("Using cached proxy", cached.proxy);
+    return cached.proxy;
+  }
+
+  // 3) Test all proxies in parallel and pick the fastest OK
+  const proxies = StreamConfig.PROXIES || [];
+  if (!proxies.length) return null;
+
+  // perform tests (limit concurrency if needed)
+  const tests = await Promise.all(proxies.map(async p => ({ proxy: p, res: await testOneProxy(p, testTarget) })));
+  const oks = tests.filter(t => t.res.ok).sort((a,b) => a.res.latency - b.res.latency);
+
+  const chosen = oks.length ? oks[0].proxy : proxies[0];
+
+  saveJSON(STORAGE.WORKING_PROXY, { proxy: chosen, checkedAt: Date.now() });
+
+  // update metrics
+  const metrics = loadJSON(STORAGE.PROXY_METRICS) || {};
+  metrics[chosen.url] = { lastTested: Date.now(), ok: oks.length > 0, latency: oks[0] ? oks[0].res.latency : null };
+  saveJSON(STORAGE.PROXY_METRICS, metrics);
+
+  // sync UI selector value if present
+  if (sel && !sel.value) sel.value = chosen.url;
+
+  log("Chosen proxy:", chosen.url, "ok:", oks.length > 0);
+  return chosen;
+}
     // Funzione per il menu mobile a tendina
     function toggleMobileMenu() {
         const controls = document.getElementById('header-controls');
@@ -236,52 +322,97 @@ function showSection(sectionId) {
         return baseUrl + "/" + url;
     }
 
-    function applyCorsProxy(url) {
-        const CORS = document.getElementById("cors-select").value;
-        const requiresEncoding = CORS_PROXIES_REQUIRING_ENCODING.some(
-            (proxy) => CORS === proxy
-        );
-        let cleanUrl = url;
-        if (url.includes(CORS)) {
-            if (requiresEncoding) {
-                cleanUrl = decodeURIComponent(url.split(CORS)[1]);
-            } else {
-                cleanUrl = url.split(CORS)[1];
-            }
-        }
-        if (
-            !cleanUrl.startsWith("http://") &&
-            !cleanUrl.startsWith("https://")
-        ) {
-            cleanUrl = resolveUrl(cleanUrl);
-            console.log("🔗 Resolved relative URL:", url, "->", cleanUrl);
-        }
-        if (
-            cleanUrl.startsWith("data:") ||
-            cleanUrl.startsWith("blob:") ||
-            !cleanUrl.startsWith("https://vixsrc.to")
-        ) {
-            return url;
-        }
+    // Assicurati che le variabili DEFAULT_BASE, CORS, CORS_PROXIES_REQUIRING_ENCODING esistano nel file
 
-        console.log("🔒 Applying CORS proxy to:", cleanUrl);
-        if (requiresEncoding) {
-            return `https://${CORS}${encodeURIComponent(cleanUrl)}`;
-        } else {
-            return `https://${CORS}${cleanUrl}`;
-        }
+function ensureScheme(u) {
+  if (!u) return u;
+  return /^https?:\/\//i.test(u) ? u : "https://" + u;
+}
+
+function composeProxiedUrl(proxy, targetUrl) {
+  // proxy: { url: string, mode: 'query'|'prefix' }
+  if (!proxy || !proxy.url) return targetUrl;
+  const target = String(targetUrl || "");
+  // Normalizza base proxy (aggiunge https:// se manca)
+  let proxyBase = String(proxy.url || "");
+  proxyBase = ensureScheme(proxyBase);
+  if (proxy.mode === "query") {
+    // query-style proxy: append encoded full URL
+    return proxyBase + encodeURIComponent(target);
+  } else {
+    // prefix-style: join senza protocollo duplicato
+    const p = proxyBase.replace(/\/$/, "");
+    const t = target.replace(/^https?:\/\//i, "");
+    return p + "/" + t;
+  }
+}
+
+function applyCorsProxy(url) {
+  try {
+    if (!url) return url;
+
+    // Prova a leggere il proxy selezionato dall'UI (supporta proxySelector o cors-select)
+    const sel = document.getElementById("proxySelector") || document.getElementById("cors-select");
+    let currentCors = sel ? (sel.value || "") : (typeof CORS !== "undefined" ? CORS : "");
+
+    // Normalizzazione helper per confronto (rimuove protocollo e slash finale)
+    const normalize = (s) => (s || "").toString().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+
+    // Se la stringa del proxy è vuota -> non proxy
+    if (!currentCors) return url;
+
+    const normalizedCors = normalize(currentCors);
+
+    // Se la risorsa è data/blob, non proxyare
+    if (/^(data:|blob:)/i.test(url)) return url;
+
+    let original = String(url);
+
+    // Se l'URL è già proxied con lo stesso host (es. https://proxy/.../https://...), non toccarlo
+    if (original.includes(normalizedCors)) {
+      // Se già contiene il proxy host come prefisso, lasciarlo così
+      if (original.indexOf(normalizedCors) === 0 || original.indexOf("://" + normalizedCors) !== -1) return original;
+      // altrimenti rimuovere eventuale parte proxy se presente più avanti (es. prefix/.../https://...)
+      const parts = original.split(normalizedCors);
+      if (parts.length > 1) {
+        original = parts.slice(1).join(normalizedCors) || parts[0];
+        try { original = decodeURIComponent(original); } catch (e) { /* ignore */ }
+      }
     }
 
-    const xhrRequestHook = (options) => {
-        const originalUri = options.uri;
-        options.uri = applyCorsProxy(originalUri);
+    // Risolvi URL relativo se necessario
+    if (!/^https?:\/\//i.test(original)) {
+      if (typeof resolveUrl === "function") original = resolveUrl(original);
+      else {
+        // fallback semplice
+        original = DEFAULT_BASE.replace(/\/$/, "") + "/" + original.replace(/^\//, "");
+      }
+    }
 
-        console.log("📡 XHR Request intercepted:");
-        console.log("   Original:", originalUri);
-        console.log("   Proxied:", options.uri);
+    // Se la risorsa non è sotto DEFAULT_BASE o origin, evita di proxyare per evitare proxying di risorse esterne
+    if (typeof DEFAULT_BASE !== "undefined" && !original.startsWith(DEFAULT_BASE) && !original.startsWith(window.location.origin)) {
+      return original;
+    }
 
-        return options;
-    };
+    // Determina se questo proxy richiede encoding dell'intero URL
+    const requiresEncoding = Array.isArray(CORS_PROXIES_REQUIRING_ENCODING) &&
+      CORS_PROXIES_REQUIRING_ENCODING.some(p => normalize(p) === normalizedCors);
+
+    // Costruisci il prefisso proxy con https se necessario
+    const prefix = ensureScheme(currentCors.replace(/\/$/, ""));
+
+    if (requiresEncoding) {
+      return `${prefix}/${encodeURIComponent(original)}`;
+    } else {
+      // rimuovi protocollo per evitare doppie slash dopo il proxy
+      const withoutProto = original.replace(/^https?:\/\//i, "");
+      return `${prefix.replace(/\/$/, "")}/${withoutProto}`;
+    }
+  } catch (e) {
+    console.error("applyCorsProxy error:", e);
+    return url;
+  }
+}
 
     function setupVideoJsXhrHook() {
         if (typeof videojs === "undefined" || !videojs.Vhs) {
